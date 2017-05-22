@@ -1,0 +1,46 @@
+hash: 1a75acdc6cd56db0c831afb4a3f9302872b55b52098dfda6d774ed4e7ec548d3
+updated: 2017-05-22T11:16:39.733872503-07:00
+imports:
+- name: github.com/beorn7/perks
+  version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
+  subpackages:
+  - quantile
+- name: github.com/golang/protobuf
+  version: 8ee79997227bf9b34611aee7946ae64735e6fd93
+  subpackages:
+  - proto
+- name: github.com/lib/pq
+  version: 50761b0867bd1d9d069276790bcd4a3bccf2324a
+- name: github.com/matttproud/golang_protobuf_extensions
+  version: fc2b8d3a73c4867e51861bbdd5ae3c1f0869dd6a
+  subpackages:
+  - pbutil
+- name: github.com/prometheus/client_golang
+  version: c5b7fccd204277076155f10851dad72b76a49317
+  subpackages:
+  - prometheus
+- name: github.com/prometheus/client_model
+  version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
+  subpackages:
+  - go
+- name: github.com/prometheus/common
+  version: 13ba4ddd0caa9c28ca7b7bffe1dfa9ed8d5ef207
+  subpackages:
+  - expfmt
+  - internal/bitbucket.org/ww/goautoneg
+  - log
+  - model
+  - version
+- name: github.com/prometheus/procfs
+  version: 454a56f35412459b5e684fd5ec0f9211b94f002a
+- name: github.com/Sirupsen/logrus
+  version: 51fe59aca108dc5680109e7b2051cbdcfa5a253c
+- name: github.com/sirupsen/logrus
+  version: ba1b36c82c5e05c4f912a88eab0dcd91a171688f
+- name: golang.org/x/sys
+  version: 8f0908ab3b2457e2e15403d3697c9ef5cb4b57a9
+  subpackages:
+  - windows
+  - windows/registry
+  - windows/svc/eventlog
+testImports: []

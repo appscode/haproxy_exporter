@@ -1,0 +1,12 @@
+package: github.com/appscode/haproxy_exporter
+import:
+- package: github.com/golang/protobuf
+  version: 8ee79997227bf9b34611aee7946ae64735e6fd93
+- package: github.com/lib/pq
+- package: github.com/prometheus/client_golang
+  version: v0.8.0
+- package: github.com/prometheus/common
+- package: github.com/sirupsen/logrus
+  version: v0.11.5
+testImport:
+- package: github.com/prometheus/client_model
