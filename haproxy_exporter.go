@@ -3,24 +3,30 @@ package main
 import (
 	"encoding/csv"
 	"errors"
-	"flag"
 	"fmt"
+	acs "github.com/appscode/k8s-addons/client/clientset"
+	"github.com/appscode/pat"
+	"github.com/appscode/voyager/pkg/controller/ingress"
+	"github.com/orcaman/concurrent-map"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/log"
+	"github.com/prometheus/common/version"
+	"github.com/spf13/cobra"
 	"io"
-	"io/ioutil"
+	kapi "k8s.io/kubernetes/pkg/api"
+	kerr "k8s.io/kubernetes/pkg/api/errors"
+	clientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
+	"k8s.io/kubernetes/pkg/client/unversioned/clientcmd"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"net/url"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/log"
-	"github.com/prometheus/common/version"
 )
 
 const (
@@ -436,33 +442,55 @@ func filterServerMetrics(filter string) (map[int]*prometheus.GaugeVec, error) {
 	return metrics, nil
 }
 
-func main() {
-	const pidFileHelpText = `Path to HAProxy pid file.
+type Options struct {
+	masterURL                 string
+	kubeconfigPath            string
+	address                   string
+	haProxyServerMetricFields string
+	haProxyTimeout            time.Duration
+}
 
-	If provided, the standard process metrics get exported for the HAProxy
-	process, prefixed with 'haproxy_process_...'. The haproxy_process exporter
-	needs to have read access to files owned by the HAProxy process. Depends on
-	the availability of /proc.
+const (
+	ParamAPIGroup  = "apiGroup"
+	ParamNamespace = "namespace"
+	ParamName      = "name"
+)
 
-	https://prometheus.io/docs/instrumenting/writing_clientlibs/#process-metrics.`
+var (
+	opt                   Options
+	selectedServerMetrics map[int]*prometheus.GaugeVec
 
-	var (
-		listenAddress             = flag.String("web.listen-address", ":9101", "Address to listen on for web interface and telemetry.")
-		metricsPath               = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
-		haProxyScrapeURI          = flag.String("haproxy.scrape-uri", "http://localhost/;csv", "URI on which to scrape HAProxy.")
-		haProxyServerMetricFields = flag.String("haproxy.server-metric-fields", serverMetrics.String(), "Comma-separated list of exported server metrics. See http://cbonte.github.io/haproxy-dconv/configuration-1.5.html#9.1")
-		haProxyTimeout            = flag.Duration("haproxy.timeout", 5*time.Second, "Timeout for trying to get stats from HAProxy.")
-		haProxyPidFile            = flag.String("haproxy.pid-file", "", pidFileHelpText)
-		showVersion               = flag.Bool("version", false, "Print version information.")
-	)
-	flag.Parse()
+	registerers = cmap.New() // URL.path => *prometheus.Registry
+	kubeClient  clientset.Interface
+	acClient    acs.AppsCodeExtensionInterface
+)
 
-	if *showVersion {
-		fmt.Fprintln(os.Stdout, version.Print("haproxy_exporter"))
-		os.Exit(0)
+func NewCmdRun() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "run",
+		Short: "Run HAProxy exporter",
+		Run: func(cmd *cobra.Command, args []string) {
+			run()
+		},
 	}
 
-	selectedServerMetrics, err := filterServerMetrics(*haProxyServerMetricFields)
+	cmd.Flags().StringVar(&opt.address, "address", ":9187", "Address to listen on for web interface and telemetry.")
+	cmd.Flags().StringVar(&opt.masterURL, "master", "", "The address of the Kubernetes API server (overrides any value in kubeconfig)")
+	cmd.Flags().StringVar(&opt.kubeconfigPath, "kubeconfig", "", "Path to kubeconfig file with authorization information (the master location is set by the master flag).")
+	cmd.Flags().StringVar(&opt.haProxyServerMetricFields, "haproxy.server-metric-fields", serverMetrics.String(), "Comma-separated list of exported server metrics. See http://cbonte.github.io/haproxy-dconv/configuration-1.5.html#9.1")
+	cmd.Flags().DurationVar(&opt.haProxyTimeout, "haproxy.timeout", 5*time.Second, "Timeout for trying to get stats from HAProxy.")
+
+	return cmd
+}
+func run() {
+	config, err := clientcmd.BuildConfigFromFlags(opt.masterURL, opt.kubeconfigPath)
+	if err != nil {
+		log.Fatal("Failed to connect to Kubernetes", err)
+	}
+	kubeClient = clientset.NewForConfigOrDie(config)
+	acClient = acs.NewACExtensionsForConfigOrDie(config)
+
+	selectedServerMetrics, err = filterServerMetrics(opt.haProxyServerMetricFields)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -470,39 +498,120 @@ func main() {
 	log.Infoln("Starting haproxy_exporter", version.Info())
 	log.Infoln("Build context", version.BuildContext())
 
-	exporter, err := NewExporter(*haProxyScrapeURI, selectedServerMetrics, *haProxyTimeout)
+	m := pat.New()
+	m.Get(fmt.Sprintf("/:%s/v1beta1/namespaces/:%s/ingresses/:%s", ParamAPIGroup, ParamNamespace, ParamName), http.HandlerFunc(ExportMetrics))
+	log.Infoln("Listening on", opt.address)
+	log.Fatal(http.ListenAndServe(opt.address, nil))
+}
+
+func ExportMetrics(w http.ResponseWriter, r *http.Request) {
+	params, found := pat.FromContext(r.Context())
+	if !found {
+		http.Error(w, "Missing parameters", http.StatusBadRequest)
+		return
+	}
+	apiGroup := params.Get(ParamAPIGroup)
+	if apiGroup == "" {
+		http.Error(w, "Missing parameter:"+ParamAPIGroup, http.StatusBadRequest)
+		return
+	}
+	namespace := params.Get(ParamNamespace)
+	if namespace == "" {
+		http.Error(w, "Missing parameter:"+ParamNamespace, http.StatusBadRequest)
+		return
+	}
+	ingressName := params.Get(ParamName)
+	if ingressName == "" {
+		http.Error(w, "Missing parameter:"+ParamName, http.StatusBadRequest)
+		return
+	}
+
+	switch params.Get(apiGroup) {
+	case "extensions":
+		var reg *prometheus.Registry
+		if val, ok := registerers.Get(r.URL.Path); ok {
+			reg = val.(*prometheus.Registry)
+		} else {
+			reg = prometheus.NewRegistry()
+			if exists := registerers.SetIfAbsent(r.URL.Path, reg); exists {
+				r2, _ := registerers.Get(r.URL.Path)
+				reg = r2.(*prometheus.Registry)
+			} else {
+				ingress, err := kubeClient.Extensions().Ingresses(namespace).Get(ingressName)
+				if kerr.IsNotFound(err) {
+					http.NotFound(w, r)
+					return
+				} else if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				scrapeURL, err := getScrapeURL(ingress.ObjectMeta)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				exporter, err := NewExporter(scrapeURL, selectedServerMetrics, opt.haProxyTimeout)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				reg.MustRegister(exporter)
+				reg.MustRegister(version.NewCollector("haproxy_exporter"))
+			}
+		}
+		promhttp.HandlerFor(reg, promhttp.HandlerOpts{}).ServeHTTP(w, r)
+		return
+	case "appscode.com":
+		var reg *prometheus.Registry
+		if val, ok := registerers.Get(r.URL.Path); ok {
+			reg = val.(*prometheus.Registry)
+		} else {
+			reg = prometheus.NewRegistry()
+			if exists := registerers.SetIfAbsent(r.URL.Path, reg); exists {
+				r2, _ := registerers.Get(r.URL.Path)
+				reg = r2.(*prometheus.Registry)
+			} else {
+				ingress, err := acClient.Ingress(namespace).Get(ingressName)
+				if kerr.IsNotFound(err) {
+					http.NotFound(w, r)
+					return
+				} else if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				scrapeURL, err := getScrapeURL(ingress.ObjectMeta)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				exporter, err := NewExporter(scrapeURL, selectedServerMetrics, opt.haProxyTimeout)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				reg.MustRegister(exporter)
+				reg.MustRegister(version.NewCollector("haproxy_exporter"))
+			}
+		}
+		promhttp.HandlerFor(reg, promhttp.HandlerOpts{}).ServeHTTP(w, r)
+		return
+	}
+	http.NotFound(w, r)
+}
+
+func getScrapeURL(meta kapi.ObjectMeta) (string, error) {
+	if _, ok := meta.Annotations[ingress.StatsOn]; !ok {
+		return "", errors.New("Stats not exposed")
+	}
+	secretName, ok := meta.Annotations[ingress.StatsSecret]
+	if !ok {
+		return fmt.Sprintf("http://%s-stats.%s:%d?stats;csv", meta.Name, meta.Namespace, ingress.StatPort), nil
+	}
+	secret, err := kubeClient.Core().Secrets(meta.Namespace).Get(secretName)
 	if err != nil {
-		log.Fatal(err)
+		return "", err
 	}
-	prometheus.MustRegister(exporter)
-	prometheus.MustRegister(version.NewCollector("haproxy_exporter"))
-
-	if *haProxyPidFile != "" {
-		procExporter := prometheus.NewProcessCollectorPIDFn(
-			func() (int, error) {
-				content, err := ioutil.ReadFile(*haProxyPidFile)
-				if err != nil {
-					return 0, fmt.Errorf("Can't read pid file: %s", err)
-				}
-				value, err := strconv.Atoi(strings.TrimSpace(string(content)))
-				if err != nil {
-					return 0, fmt.Errorf("Can't parse pid file: %s", err)
-				}
-				return value, nil
-			}, namespace)
-		prometheus.MustRegister(procExporter)
-	}
-
-	log.Infoln("Listening on", *listenAddress)
-	http.Handle(*metricsPath, prometheus.Handler())
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<html>
-             <head><title>Haproxy Exporter</title></head>
-             <body>
-             <h1>Haproxy Exporter</h1>
-             <p><a href='` + *metricsPath + `'>Metrics</a></p>
-             </body>
-             </html>`))
-	})
-	log.Fatal(http.ListenAndServe(*listenAddress, nil))
+	userName := string(secret.Data["username"])
+	passWord := string(secret.Data["password"])
+	return fmt.Sprintf("http://%s:%s@%s-stats.%s:%d?stats;csv", userName, passWord, meta.Name, meta.Namespace, ingress.StatPort), nil
 }
