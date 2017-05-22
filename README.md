@@ -1,3 +1,5 @@
+[![Go Report Card](https://goreportcard.com/badge/github.com/appscode/haproxy_exporter)](https://goreportcard.com/report/github.com/appscode/haproxy_exporter)
+
 # HAProxy Exporter for Prometheus
 
 This is a simple server that scrapes HAProxy stats and exports them via HTTP for
