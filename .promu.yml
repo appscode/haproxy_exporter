@@ -1,5 +1,5 @@
 repository:
-    path: github.com/prometheus/haproxy_exporter
+    path: github.com/appscode/haproxy_exporter
 build:
     flags: -a -tags netgo
     ldflags: |

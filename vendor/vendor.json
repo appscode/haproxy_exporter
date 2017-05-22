@@ -81,5 +81,5 @@
 			"revisionTime": "2015-11-17T03:15:20Z"
 		}
 	],
-	"rootPath": "github.com/prometheus/haproxy_exporter"
+	"rootPath": "github.com/appscode/haproxy_exporter"
 }

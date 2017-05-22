@@ -20,7 +20,7 @@ Help on flags:
 For more information check the [source code documentation][gdocs]. All of the
 core developers are accessible via the Prometheus Developers [mailinglist][].
 
-[gdocs]: http://godoc.org/github.com/prometheus/haproxy_exporter
+[gdocs]: http://godoc.org/github.com/appscode/haproxy_exporter
 [mailinglist]: https://groups.google.com/forum/?fromgroups#!forum/prometheus-developers
 
 ## Usage
@@ -82,10 +82,10 @@ docker run -p 9101:9101 quay.io/prometheus/haproxy-exporter -haproxy.scrape-uri=
 
 ## Development
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/prometheus/haproxy_exporter)][goreportcard]
+[![Go Report Card](https://goreportcard.com/badge/github.com/appscode/haproxy_exporter)][goreportcard]
 [![Code Climate](https://codeclimate.com/github/prometheus/haproxy_exporter/badges/gpa.svg)][codeclimate]
 
-[goreportcard]: https://goreportcard.com/report/github.com/prometheus/haproxy_exporter
+[goreportcard]: https://goreportcard.com/report/github.com/appscode/haproxy_exporter
 [codeclimate]: https://codeclimate.com/github/prometheus/haproxy_exporter
 
 ### Building
@@ -108,4 +108,4 @@ make test
 
 ## License
 
-Apache License 2.0, see [LICENSE](https://github.com/prometheus/haproxy_exporter/blob/master/LICENSE).
+Apache License 2.0, see [LICENSE](https://github.com/appscode/haproxy_exporter/blob/master/LICENSE).
