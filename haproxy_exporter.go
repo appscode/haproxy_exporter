@@ -499,7 +499,7 @@ func run() {
 	log.Infoln("Build context", version.BuildContext())
 
 	m := pat.New()
-	m.Get(fmt.Sprintf("/:%s/v1beta1/namespaces/:%s/ingresses/:%s", ParamAPIGroup, ParamNamespace, ParamName), http.HandlerFunc(ExportMetrics))
+	m.Get(fmt.Sprintf("/:%s/v1beta1/namespaces/:%s/ingresses/:%s/metrics", ParamAPIGroup, ParamNamespace, ParamName), http.HandlerFunc(ExportMetrics))
 	log.Infoln("Listening on", opt.address)
 	log.Fatal(http.ListenAndServe(opt.address, nil))
 }
