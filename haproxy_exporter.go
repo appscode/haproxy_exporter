@@ -499,9 +499,16 @@ func run() {
 	log.Infoln("Build context", version.BuildContext())
 
 	m := pat.New()
-	m.Get(fmt.Sprintf("/:%s/v1beta1/namespaces/:%s/ingresses/:%s/metrics", ParamAPIGroup, ParamNamespace, ParamName), http.HandlerFunc(ExportMetrics))
+	path := fmt.Sprintf("/:%s/v1beta1/namespaces/:%s/ingresses/:%s/metrics", ParamAPIGroup, ParamNamespace, ParamName)
+	m.Get(path, http.HandlerFunc(ExportMetrics))
+	m.Del(path, http.HandlerFunc(DeleteRegistry))
 	log.Infoln("Listening on", opt.address)
 	log.Fatal(http.ListenAndServe(opt.address, nil))
+}
+
+func DeleteRegistry(w http.ResponseWriter, r *http.Request) {
+	registerers.Remove(r.URL.Path)
+	w.WriteHeader(http.StatusOK)
 }
 
 func ExportMetrics(w http.ResponseWriter, r *http.Request) {
