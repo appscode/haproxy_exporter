@@ -451,9 +451,9 @@ type Options struct {
 }
 
 const (
-	ParamAPIGroup  = "apiGroup"
-	ParamNamespace = "namespace"
-	ParamName      = "name"
+	ParamAPIGroup  = ":apiGroup"
+	ParamNamespace = ":namespace"
+	ParamName      = ":name"
 )
 
 var (
@@ -499,9 +499,10 @@ func run() {
 	log.Infoln("Build context", version.BuildContext())
 
 	m := pat.New()
-	path := fmt.Sprintf("/:%s/v1beta1/namespaces/:%s/ingresses/:%s/metrics", ParamAPIGroup, ParamNamespace, ParamName)
-	m.Get(path, http.HandlerFunc(ExportMetrics))
-	m.Del(path, http.HandlerFunc(DeleteRegistry))
+	pattern := fmt.Sprintf("/%s/v1beta1/namespaces/%s/ingresses/%s/metrics", ParamAPIGroup, ParamNamespace, ParamName)
+	log.Infof("URL pattern: %s", pattern)
+	m.Get(pattern, http.HandlerFunc(ExportMetrics))
+	m.Del(pattern, http.HandlerFunc(DeleteRegistry))
 	log.Infoln("Listening on", opt.address)
 	log.Fatal(http.ListenAndServe(opt.address, nil))
 }
@@ -527,24 +528,25 @@ func ExportMetrics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Missing parameter:"+ParamNamespace, http.StatusBadRequest)
 		return
 	}
-	ingressName := params.Get(ParamName)
-	if ingressName == "" {
+	name := params.Get(ParamName)
+	if name == "" {
 		http.Error(w, "Missing parameter:"+ParamName, http.StatusBadRequest)
 		return
 	}
 
-	switch params.Get(apiGroup) {
+	switch apiGroup {
 	case "extensions":
 		var reg *prometheus.Registry
 		if val, ok := registerers.Get(r.URL.Path); ok {
 			reg = val.(*prometheus.Registry)
 		} else {
 			reg = prometheus.NewRegistry()
-			if exists := registerers.SetIfAbsent(r.URL.Path, reg); exists {
+			if absent := registerers.SetIfAbsent(r.URL.Path, reg); !absent {
 				r2, _ := registerers.Get(r.URL.Path)
 				reg = r2.(*prometheus.Registry)
 			} else {
-				ingress, err := kubeClient.Extensions().Ingresses(namespace).Get(ingressName)
+				log.Infof("Configuring exporter for standard ingress %s in namespace %s", name, namespace)
+				ingress, err := kubeClient.Extensions().Ingresses(namespace).Get(name)
 				if kerr.IsNotFound(err) {
 					http.NotFound(w, r)
 					return
@@ -574,11 +576,12 @@ func ExportMetrics(w http.ResponseWriter, r *http.Request) {
 			reg = val.(*prometheus.Registry)
 		} else {
 			reg = prometheus.NewRegistry()
-			if exists := registerers.SetIfAbsent(r.URL.Path, reg); exists {
+			if absent := registerers.SetIfAbsent(r.URL.Path, reg); !absent {
 				r2, _ := registerers.Get(r.URL.Path)
 				reg = r2.(*prometheus.Registry)
 			} else {
-				ingress, err := acClient.Ingress(namespace).Get(ingressName)
+				log.Infof("Configuring exporter for appscode ingress %s in namespace %s", name, namespace)
+				ingress, err := acClient.Ingress(namespace).Get(name)
 				if kerr.IsNotFound(err) {
 					http.NotFound(w, r)
 					return
