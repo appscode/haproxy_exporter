@@ -454,6 +454,7 @@ const (
 	ParamAPIGroup  = ":apiGroup"
 	ParamNamespace = ":namespace"
 	ParamName      = ":name"
+	ParamPodIP     = ":ip"
 )
 
 var (
@@ -499,10 +500,11 @@ func run() {
 	log.Infoln("Build context", version.BuildContext())
 
 	m := pat.New()
-	pattern := fmt.Sprintf("/%s/v1beta1/namespaces/%s/ingresses/%s/metrics", ParamAPIGroup, ParamNamespace, ParamName)
+	pattern := fmt.Sprintf("/%s/v1beta1/namespaces/%s/ingresses/%s/pods/%s/metrics", ParamAPIGroup, ParamNamespace, ParamName, ParamPodIP)
 	log.Infof("URL pattern: %s", pattern)
 	m.Get(pattern, http.HandlerFunc(ExportMetrics))
 	m.Del(pattern, http.HandlerFunc(DeleteRegistry))
+	http.Handle("/", m)
 	log.Infoln("Listening on", opt.address)
 	log.Fatal(http.ListenAndServe(opt.address, nil))
 }
@@ -533,6 +535,11 @@ func ExportMetrics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Missing parameter:"+ParamName, http.StatusBadRequest)
 		return
 	}
+	podIP := params.Get(ParamPodIP)
+	if podIP == "" {
+		http.Error(w, "Missing parameter:"+ParamPodIP, http.StatusBadRequest)
+		return
+	}
 
 	switch apiGroup {
 	case "extensions":
@@ -554,7 +561,7 @@ func ExportMetrics(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
-				scrapeURL, err := getScrapeURL(ingress.ObjectMeta)
+				scrapeURL, err := getScrapeURL(ingress.ObjectMeta, podIP)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
@@ -589,7 +596,7 @@ func ExportMetrics(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
-				scrapeURL, err := getScrapeURL(ingress.ObjectMeta)
+				scrapeURL, err := getScrapeURL(ingress.ObjectMeta, podIP)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
@@ -609,13 +616,13 @@ func ExportMetrics(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func getScrapeURL(meta kapi.ObjectMeta) (string, error) {
+func getScrapeURL(meta kapi.ObjectMeta, podIP string) (string, error) {
 	if _, ok := meta.Annotations[ingress.StatsOn]; !ok {
 		return "", errors.New("Stats not exposed")
 	}
 	secretName, ok := meta.Annotations[ingress.StatsSecret]
 	if !ok {
-		return fmt.Sprintf("http://%s-stats.%s:%d?stats;csv", meta.Name, meta.Namespace, ingress.StatPort), nil
+		return fmt.Sprintf("http://%s:%d?stats;csv", podIP, ingress.StatPort), nil
 	}
 	secret, err := kubeClient.Core().Secrets(meta.Namespace).Get(secretName)
 	if err != nil {
@@ -623,5 +630,5 @@ func getScrapeURL(meta kapi.ObjectMeta) (string, error) {
 	}
 	userName := string(secret.Data["username"])
 	passWord := string(secret.Data["password"])
-	return fmt.Sprintf("http://%s:%s@%s-stats.%s:%d?stats;csv", userName, passWord, meta.Name, meta.Namespace, ingress.StatPort), nil
+	return fmt.Sprintf("http://%s:%s@%s:%d?stats;csv", userName, passWord, podIP, ingress.StatPort), nil
 }
