@@ -1,17 +1,14 @@
-package main
+package exporter
 
 import (
 	"encoding/csv"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"net/url"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,11 +17,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
-	"github.com/prometheus/common/version"
 )
 
 const (
-	namespace = "haproxy" // For Prometheus metrics.
+	Namespace = "haproxy" // For Prometheus metrics.
 
 	// HAProxy 1.4
 	// # pxname,svname,qcur,qmax,scur,smax,slim,stot,bin,bout,dreq,dresp,ereq,econ,eresp,wretr,wredis,status,weight,act,bck,chkfail,chkdown,lastchg,downtime,qlimit,pid,iid,sid,throttle,lbtot,tracked,type,rate,rate_lim,rate_max,check_status,check_code,check_duration,hrsp_1xx,hrsp_2xx,hrsp_3xx,hrsp_4xx,hrsp_5xx,hrsp_other,hanafail,req_rate,req_rate_max,req_tot,cli_abrt,srv_abrt,
@@ -43,7 +39,7 @@ var (
 func newFrontendMetric(metricName string, docString string, constLabels prometheus.Labels) *prometheus.GaugeVec {
 	return prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace:   namespace,
+			Namespace:   Namespace,
 			Name:        "frontend_" + metricName,
 			Help:        docString,
 			ConstLabels: constLabels,
@@ -55,7 +51,7 @@ func newFrontendMetric(metricName string, docString string, constLabels promethe
 func newBackendMetric(metricName string, docString string, constLabels prometheus.Labels) *prometheus.GaugeVec {
 	return prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace:   namespace,
+			Namespace:   Namespace,
 			Name:        "backend_" + metricName,
 			Help:        docString,
 			ConstLabels: constLabels,
@@ -67,7 +63,7 @@ func newBackendMetric(metricName string, docString string, constLabels prometheu
 func newServerMetric(metricName string, docString string, constLabels prometheus.Labels) *prometheus.GaugeVec {
 	return prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace:   namespace,
+			Namespace:   Namespace,
 			Name:        "server_" + metricName,
 			Help:        docString,
 			ConstLabels: constLabels,
@@ -92,7 +88,7 @@ func (m metrics) String() string {
 }
 
 var (
-	serverMetrics = metrics{
+	ServerMetrics = metrics{
 		2:  newServerMetric("current_queue", "Current number of queued requests assigned to this server.", nil),
 		3:  newServerMetric("max_queue", "Maximum observed number of queued requests assigned to this server.", nil),
 		4:  newServerMetric("current_sessions", "Current number of active sessions.", nil),
@@ -154,17 +150,17 @@ func NewExporter(uri string, selectedServerMetrics map[int]*prometheus.GaugeVec,
 		URI:   uri,
 		fetch: fetch,
 		up: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: namespace,
+			Namespace: Namespace,
 			Name:      "up",
 			Help:      "Was the last scrape of haproxy successful.",
 		}),
 		totalScrapes: prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: namespace,
+			Namespace: Namespace,
 			Name:      "exporter_total_scrapes",
 			Help:      "Current total HAProxy scrapes.",
 		}),
 		csvParseFailures: prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: namespace,
+			Namespace: Namespace,
 			Name:      "exporter_csv_parse_failures",
 			Help:      "Number of errors while parsing CSV.",
 		}),
@@ -411,9 +407,9 @@ func (e *Exporter) exportCsvFields(metrics map[int]*prometheus.GaugeVec, csvRow 
 	}
 }
 
-// filterServerMetrics returns the set of server metrics specified by the comma
+// FilterServerMetrics returns the set of server metrics specified by the comma
 // separated filter.
-func filterServerMetrics(filter string) (map[int]*prometheus.GaugeVec, error) {
+func FilterServerMetrics(filter string) (map[int]*prometheus.GaugeVec, error) {
 	metrics := map[int]*prometheus.GaugeVec{}
 	if len(filter) == 0 {
 		return metrics, nil
@@ -428,81 +424,10 @@ func filterServerMetrics(filter string) (map[int]*prometheus.GaugeVec, error) {
 		selected[field] = struct{}{}
 	}
 
-	for field, metric := range serverMetrics {
+	for field, metric := range ServerMetrics {
 		if _, ok := selected[field]; ok {
 			metrics[field] = metric
 		}
 	}
 	return metrics, nil
-}
-
-func main() {
-	const pidFileHelpText = `Path to HAProxy pid file.
-
-	If provided, the standard process metrics get exported for the HAProxy
-	process, prefixed with 'haproxy_process_...'. The haproxy_process exporter
-	needs to have read access to files owned by the HAProxy process. Depends on
-	the availability of /proc.
-
-	https://prometheus.io/docs/instrumenting/writing_clientlibs/#process-metrics.`
-
-	var (
-		listenAddress             = flag.String("web.listen-address", ":9101", "Address to listen on for web interface and telemetry.")
-		metricsPath               = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
-		haProxyScrapeURI          = flag.String("haproxy.scrape-uri", "http://localhost/;csv", "URI on which to scrape HAProxy.")
-		haProxyServerMetricFields = flag.String("haproxy.server-metric-fields", serverMetrics.String(), "Comma-separated list of exported server metrics. See http://cbonte.github.io/haproxy-dconv/configuration-1.5.html#9.1")
-		haProxyTimeout            = flag.Duration("haproxy.timeout", 5*time.Second, "Timeout for trying to get stats from HAProxy.")
-		haProxyPidFile            = flag.String("haproxy.pid-file", "", pidFileHelpText)
-		showVersion               = flag.Bool("version", false, "Print version information.")
-	)
-	flag.Parse()
-
-	if *showVersion {
-		fmt.Fprintln(os.Stdout, version.Print("haproxy_exporter"))
-		os.Exit(0)
-	}
-
-	selectedServerMetrics, err := filterServerMetrics(*haProxyServerMetricFields)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Infoln("Starting haproxy_exporter", version.Info())
-	log.Infoln("Build context", version.BuildContext())
-
-	exporter, err := NewExporter(*haProxyScrapeURI, selectedServerMetrics, *haProxyTimeout)
-	if err != nil {
-		log.Fatal(err)
-	}
-	prometheus.MustRegister(exporter)
-	prometheus.MustRegister(version.NewCollector("haproxy_exporter"))
-
-	if *haProxyPidFile != "" {
-		procExporter := prometheus.NewProcessCollectorPIDFn(
-			func() (int, error) {
-				content, err := ioutil.ReadFile(*haProxyPidFile)
-				if err != nil {
-					return 0, fmt.Errorf("Can't read pid file: %s", err)
-				}
-				value, err := strconv.Atoi(strings.TrimSpace(string(content)))
-				if err != nil {
-					return 0, fmt.Errorf("Can't parse pid file: %s", err)
-				}
-				return value, nil
-			}, namespace)
-		prometheus.MustRegister(procExporter)
-	}
-
-	log.Infoln("Listening on", *listenAddress)
-	http.Handle(*metricsPath, prometheus.Handler())
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<html>
-             <head><title>Haproxy Exporter</title></head>
-             <body>
-             <h1>Haproxy Exporter</h1>
-             <p><a href='` + *metricsPath + `'>Metrics</a></p>
-             </body>
-             </html>`))
-	})
-	log.Fatal(http.ListenAndServe(*listenAddress, nil))
 }
