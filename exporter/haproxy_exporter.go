@@ -72,9 +72,9 @@ func newServerMetric(metricName string, docString string, constLabels prometheus
 	)
 }
 
-type metrics map[int]*prometheus.GaugeVec
+type Metrics map[int]*prometheus.GaugeVec
 
-func (m metrics) String() string {
+func (m Metrics) String() string {
 	keys := make([]int, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
@@ -88,7 +88,7 @@ func (m metrics) String() string {
 }
 
 var (
-	ServerMetrics = metrics{
+	ServerMetrics = Metrics{
 		2:  newServerMetric("current_queue", "Current number of queued requests assigned to this server.", nil),
 		3:  newServerMetric("max_queue", "Maximum observed number of queued requests assigned to this server.", nil),
 		4:  newServerMetric("current_sessions", "Current number of active sessions.", nil),
@@ -444,7 +444,7 @@ func (e *Exporter) filterServerMetrics(filter string) (map[int]*prometheus.Gauge
 		selected[field] = struct{}{}
 	}
 
-	serverMetrics := metrics{
+	serverMetrics := Metrics{
 		2:  newServerMetric("current_queue", "Current number of queued requests assigned to this server.", e.getConstLabels(nil)),
 		3:  newServerMetric("max_queue", "Maximum observed number of queued requests assigned to this server.", e.getConstLabels(nil)),
 		4:  newServerMetric("current_sessions", "Current number of active sessions.", e.getConstLabels(nil)),
