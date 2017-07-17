@@ -43,15 +43,10 @@ func main() {
 		os.Exit(0)
 	}
 
-	selectedServerMetrics, err := hpe.FilterServerMetrics(*haProxyServerMetricFields)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	log.Infoln("Starting haproxy_exporter", version.Info())
 	log.Infoln("Build context", version.BuildContext())
 
-	exporter, err := hpe.NewExporter(*haProxyScrapeURI, selectedServerMetrics, *haProxyTimeout)
+	exporter, err := hpe.NewExporter(*haProxyScrapeURI, "", *haProxyServerMetricFields, *haProxyTimeout)
 	if err != nil {
 		log.Fatal(err)
 	}
